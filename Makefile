@@ -1,4 +1,10 @@
-MCL_DIR?=../mcl
+ifeq ($(findstring MINGW64,$(shell uname -s)),MINGW64)
+  # cgo accepts not '/c/path' but 'c:/path'
+  PWD=$(shell pwd|sed s'@^/\([a-z]\)@\1:@')
+else
+  PWD=$(shell pwd)
+endif
+MCL_DIR?=$(PWD)/../mcl
 include $(MCL_DIR)/common.mk
 LIB_DIR=lib
 OBJ_DIR=obj
@@ -21,14 +27,12 @@ ifeq ($(BLS_SWAP_G),1)
   CFLAGS+=-DBLS_SWAP_G
 endif
 
-SHARE_BASENAME_SUF?=_dy
-
 BLS256_LIB=$(LIB_DIR)/libbls256.a
 BLS384_LIB=$(LIB_DIR)/libbls384.a
 BLS384_256_LIB=$(LIB_DIR)/libbls384_256.a
-BLS256_SNAME=bls256$(SHARE_BASENAME_SUF)
-BLS384_SNAME=bls384$(SHARE_BASENAME_SUF)
-BLS384_256_SNAME=bls384_256$(SHARE_BASENAME_SUF)
+BLS256_SNAME=bls256
+BLS384_SNAME=bls384
+BLS384_256_SNAME=bls384_256
 BLS256_SLIB=$(LIB_DIR)/lib$(BLS256_SNAME).$(LIB_SUF)
 BLS384_SLIB=$(LIB_DIR)/lib$(BLS384_SNAME).$(LIB_SUF)
 BLS384_256_SLIB=$(LIB_DIR)/lib$(BLS384_256_SNAME).$(LIB_SUF)
@@ -84,40 +88,43 @@ $(EXE_DIR)/%256_test.exe: $(OBJ_DIR)/%256_test.o $(BLS256_LIB) $(MCL_LIB)
 # sample exe links libbls256.a
 $(EXE_DIR)/%.exe: $(OBJ_DIR)/%.o $(BLS256_LIB) $(MCL_LIB)
 	$(PRE)$(CXX) $< -o $@ $(BLS256_LIB) -L$(MCL_DIR)/lib -lmcl $(LDFLAGS)
+ifeq ($(OS),mac)
+	install_name_tool bin/bls_smpl.exe -change lib/libmcl.dylib $(MCL_DIR)/lib/libmcl.dylib
+endif
 
 SAMPLE_EXE=$(addprefix $(EXE_DIR)/,$(SAMPLE_SRC:.cpp=.exe))
 sample: $(SAMPLE_EXE)
 
 TEST_EXE=$(addprefix $(EXE_DIR)/,$(TEST_SRC:.cpp=.exe))
+ifeq ($(OS),mac)
+  LIBPATH_KEY=DYLD_LIBRARY_PATH
+else
+  LIBPATH_KEY=LD_LIBRARY_PATH
+endif
 test_ci: $(TEST_EXE)
-	@sh -ec 'for i in $(TEST_EXE); do echo $$i; env LSAN_OPTIONS=verbosity=1:log_threads=1 $$i; done'
+	@sh -ec 'for i in $(TEST_EXE); do echo $$i; env PATH=$$PATH:../mcl/lib $(LIBPATH_KEY)=../mcl/lib LSAN_OPTIONS=verbosity=1 log_threads=1 $$i; done'
 	$(MAKE) sample_test
 
 test: $(TEST_EXE)
 	@echo test $(TEST_EXE)
-	@sh -ec 'for i in $(TEST_EXE); do $$i|grep "ctest:name"; done' > result.txt
+	@sh -ec 'for i in $(TEST_EXE); do env PATH=$$PATH:../mcl/lib $(LIBPATH_KEY)=../mcl/lib $$i|grep "ctest:name"; done' > result.txt
 	@grep -v "ng=0, exception=0" result.txt; if [ $$? -eq 1 ]; then echo "all unit tests succeed"; else exit 1; fi
 	$(MAKE) sample_test
 
 sample_test: $(EXE_DIR)/bls_smpl.exe
-	python bls_smpl.py
+	env PATH=$$PATH:../mcl/lib $(LIBPATH_KEY)=../mcl/lib python bls_smpl.py
 
-ifeq ($(OS),mac)
-  MAC_GO_LDFLAGS="-ldflags=-s"
-endif
-# PATH is for mingw, LD_RUN_PATH is for linux, DYLD_LIBRARY_PATH is for mac
-# use bls384 unless tags is specified
-test_go_default: ffi/go/bls/bls.go ffi/go/bls/bls_test.go $(BLS384_SLIB)
-	cd ffi/go/bls && env PATH=$$PATH:../../../lib LD_RUN_PATH="../../../lib" DYLD_LIBRARY_PATH="../../../lib" go test $(MAC_GO_LDFLAGS) .
+# PATH is for mingw, LD_LIBRARY_PATH is for linux, DYLD_LIBRARY_PATH is for mac
+COMMON_LIB_PATH="../../../lib:../../../../mcl/lib"
+PATH_VAL=$$PATH:$(COMMON_LIB_PATH) LD_LIBRARY_PATH=$(COMMON_LIB_PATH) DYLD_LIBRARY_PATH=$(COMMON_LIB_PATH) CGO_LDFLAGS="-L../../../lib" CGO_CFLAGS="-I$(PWD)/include -I$(MCL_DIR)/include"
 test_go256: ffi/go/bls/bls.go ffi/go/bls/bls_test.go $(BLS256_SLIB)
-	cd ffi/go/bls && env PATH=$$PATH:../../../lib LD_RUN_PATH="../../../lib" DYLD_LIBRARY_PATH="../../../lib" go test $(MAC_GO_LDFLAGS) -tags bn256 .
+	cd ffi/go/bls && env PATH=$(PATH_VAL) go test -tags bn256 .
 test_go384: ffi/go/bls/bls.go ffi/go/bls/bls_test.go $(BLS384_SLIB)
-	cd ffi/go/bls && env PATH=$$PATH:../../../lib LD_RUN_PATH="../../../lib" DYLD_LIBRARY_PATH="../../../lib" go test $(MAC_GO_LDFLAGS) -tags bn384 .
+	cd ffi/go/bls && env PATH=$(PATH_VAL) go test -tags bn384 .
 test_go384_256: ffi/go/bls/bls.go ffi/go/bls/bls_test.go $(BLS384_256_SLIB)
-	cd ffi/go/bls && env PATH=$$PATH:../../../lib LD_RUN_PATH="../../../lib" DYLD_LIBRARY_PATH="../../../lib" go test $(MAC_GO_LDFLAGS) -tags bn384_256 .
+	cd ffi/go/bls && env PATH=$(PATH_VAL) go test -tags bn384_256 .
 
 test_go:
-	$(MAKE) test_go_default
 	$(MAKE) test_go256
 	$(MAKE) test_go384
 	$(MAKE) test_go384_256
@@ -142,6 +149,13 @@ clean:
 ALL_SRC=$(SRC_SRC) $(TEST_SRC) $(SAMPLE_SRC)
 DEPEND_FILE=$(addprefix $(OBJ_DIR)/, $(ALL_SRC:.cpp=.d))
 -include $(DEPEND_FILE)
+
+PREFIX?=/usr/local
+install: lib/libbls256.a lib/libbls256.$(LIB_SUF) lib/libbls384.a lib/libbls384.$(LIB_SUF) lib/libbls384_256.a lib/libbls384_256.$(LIB_SUF)
+	$(MKDIR) $(PREFIX)/include/bls
+	cp -a include/bls/ $(PREFIX)/include/
+	$(MKDIR) $(PREFIX)/lib
+	cp -a lib/libbls256.a lib/libbls256.$(LIB_SUF) lib/libbls384.a lib/libbls384.$(LIB_SUF) lib/libbls384_256.a lib/libbls384_256.$(LIB_SUF) $(PREFIX)/lib/
 
 .PHONY: test bls-wasm
 

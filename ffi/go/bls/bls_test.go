@@ -2,6 +2,10 @@ package bls
 
 import "testing"
 import "strconv"
+import "crypto/sha256"
+import "crypto/sha512"
+import "fmt"
+import "crypto/rand"
 
 var unitN = 0
 
@@ -356,6 +360,129 @@ func testDHKeyExchange(t *testing.T) {
 	}
 }
 
+func testPairing(t *testing.T) {
+	var sec SecretKey
+	sec.SetByCSPRNG()
+	pub := sec.GetPublicKey()
+	m := "abc"
+	sig1 := sec.Sign(m)
+	sig2 := HashAndMapToSignature([]byte(m))
+	if !VerifyPairing(sig1, sig2, pub) {
+		t.Errorf("VerifyPairing")
+	}
+}
+
+func testAggregate(t *testing.T) {
+	var sec SecretKey
+	sec.SetByCSPRNG()
+	pub := sec.GetPublicKey()
+	msgTbl := []string{"abc", "def", "123"}
+	n := len(msgTbl)
+	sigVec := make([]*Sign, n)
+	for i := 0; i < n; i++ {
+		m := msgTbl[i]
+		sigVec[i] = sec.Sign(m)
+	}
+	aggSign := sigVec[0]
+	for i := 1; i < n; i++ {
+		aggSign.Add(sigVec[i])
+	}
+	hashPt := HashAndMapToSignature([]byte(msgTbl[0]))
+	for i := 1; i < n; i++ {
+		hashPt.Add(HashAndMapToSignature([]byte(msgTbl[i])))
+	}
+	if !VerifyPairing(aggSign, hashPt, pub) {
+		t.Errorf("aggregate2")
+	}
+}
+
+func Hash(buf []byte) []byte {
+	if GetOpUnitSize() == 4 {
+		d := sha256.Sum256([]byte(buf))
+		return d[:]
+	} else {
+		// use SHA512 if bitSize > 256
+		d := sha512.Sum512([]byte(buf))
+		return d[:]
+	}
+}
+
+func testHash(t *testing.T) {
+	var sec SecretKey
+	sec.SetByCSPRNG()
+	pub := sec.GetPublicKey()
+	m := "abc"
+	h := Hash([]byte(m))
+	sig1 := sec.Sign(m)
+	sig2 := sec.SignHash(h)
+	if !sig1.IsEqual(sig2) {
+		t.Errorf("SignHash")
+	}
+	if !sig1.Verify(pub, m) {
+		t.Errorf("sig1.Verify")
+	}
+	if !sig2.VerifyHash(pub, h) {
+		t.Errorf("sig2.VerifyHash")
+	}
+}
+
+func testAggregateHashes(t *testing.T) {
+	n := 1000
+	pubVec := make([]PublicKey, n)
+	sigVec := make([]*Sign, n)
+	h := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		sec := new(SecretKey)
+		sec.SetByCSPRNG()
+		pubVec[i] = *sec.GetPublicKey()
+		m := fmt.Sprintf("abc-%d", i)
+		h[i] = Hash([]byte(m))
+		sigVec[i] = sec.SignHash(h[i])
+	}
+	// aggregate sig
+	sig := sigVec[0]
+	for i := 1; i < n; i++ {
+		sig.Add(sigVec[i])
+	}
+	if !sig.VerifyAggregateHashes(pubVec, h) {
+		t.Errorf("sig.VerifyAggregateHashes")
+	}
+}
+
+type SeqRead struct {
+}
+
+func (self *SeqRead) Read(buf []byte) (int, error) {
+	n := len(buf)
+	for i := 0; i < n; i++ {
+		buf[i] = byte(i)
+	}
+	return n, nil
+}
+
+func testReadRand(t *testing.T) {
+	s1 := new(SeqRead)
+	SetRandFunc(s1)
+	var sec SecretKey
+	sec.SetByCSPRNG()
+	buf := sec.GetLittleEndian()
+	fmt.Printf("(SeqRead) buf=%x\n", buf)
+	for i := 0; i < len(buf)-1; i++ {
+		// ommit buf[len(buf) - 1] because it may be masked
+		if buf[i] != byte(i) {
+			t.Fatal("buf")
+		}
+	}
+	SetRandFunc(rand.Reader)
+	sec.SetByCSPRNG()
+	buf = sec.GetLittleEndian()
+	fmt.Printf("(rand.Reader) buf=%x\n", buf)
+	SetRandFunc(nil)
+	sec.SetByCSPRNG()
+	buf = sec.GetLittleEndian()
+	fmt.Printf("(default) buf=%x\n", buf)
+}
+
 func test(t *testing.T, c int) {
 	err := Init(c)
 	if err != nil {
@@ -363,6 +490,7 @@ func test(t *testing.T, c int) {
 	}
 	unitN = GetOpUnitSize()
 	t.Logf("unitN=%d\n", unitN)
+	testReadRand(t)
 	testPre(t)
 	testRecoverSecretKey(t)
 	testAdd(t)
@@ -373,6 +501,10 @@ func test(t *testing.T, c int) {
 	testOrder(t, c)
 	testDHKeyExchange(t)
 	testSerializeToHexStr(t)
+	testPairing(t)
+	testAggregate(t)
+	testHash(t)
+	testAggregateHashes(t)
 }
 
 func TestMain(t *testing.T) {

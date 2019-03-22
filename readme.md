@@ -16,6 +16,7 @@ git clone git://github.com/herumi/cybozulib_ext ; for only Windows
 ```
 
 # News
+* (Break backward compatibility) The suffix `_dy` of library name is removed and bls\*.a requires libmcl.so set LD_LIBRARY_PATH to the directory.
 * -tags option for Go bindings
     * -tags bn256
     * -tags bn384\_256
@@ -25,6 +26,8 @@ git clone git://github.com/herumi/cybozulib_ext ; for only Windows
     * golang binding does not support this feature yet.
 * Build option without GMP
     * `make MCL_USE_GMP=0`
+* Build option without OpenSSL
+    * `make MCL_USE_OPENSSL=0`
 * Build option to specify `mcl` directory
     * `make MCL_DIR=<mcl directory>`
 
@@ -58,9 +61,9 @@ bin\bls_c384_test.exe
 ```
 
 # Library
-* libbls256.a/libbls256_dy.so ; for BN254 compiled with MCLBN_FP_UNIT_SIZE=4
-* libbls384.a/libbls384_dy.so ; for BN254/BN381_1/BLS12_381 compiled with MCLBN_FP_UNIT_SIZE=6
-* libbls384_256.a/libbls384_256_dy.so ; for BN254/BLS12_381 compiled with MCLBN_FP_UNIT_SIZE=6 and MCLBN_FR_UNIT_SIZE=4
+* libbls256.a/libbls256.so ; for BN254 compiled with MCLBN_FP_UNIT_SIZE=4
+* libbls384.a/libbls384.so ; for BN254/BN381_1/BLS12_381 compiled with MCLBN_FP_UNIT_SIZE=6
+* libbls384_256.a/libbls384_256.so ; for BN254/BLS12_381 compiled with MCLBN_FP_UNIT_SIZE=6 and MCLBN_FR_UNIT_SIZE=4
 
 See `mcl/include/curve_type.h` for curve parameter
 

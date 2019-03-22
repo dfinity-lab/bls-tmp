@@ -3,6 +3,7 @@
 #include <bls/bls.h>
 #include <string.h>
 #include <cybozu/benchmark.hpp>
+#include <gmpxx.h>
 
 size_t pubSize(size_t FrSize)
 {
@@ -78,7 +79,7 @@ void blsDataTest()
 	CYBOZU_TEST_ASSERT(blsSignatureIsEqual(&sig1, &sig2));
 }
 
-void blsOrderTest(const char *curveOrder, const char *fieldOrder)
+void blsOrderTest(const char *curveOrder/*Fr*/, const char *fieldOrder/*Fp*/)
 {
 	char buf[1024];
 	size_t len;
@@ -320,6 +321,58 @@ void blsAddSubTest()
 	CYBOZU_TEST_ASSERT(blsSignatureIsEqual(&sig[2], &sig[0]));
 }
 
+void blsTrivialShareTest()
+{
+	blsSecretKey sec1, sec2;
+	blsPublicKey pub1, pub2;
+	blsId id;
+	blsIdSetInt(&id, 123);
+
+	blsSecretKeySetByCSPRNG(&sec1);
+	blsGetPublicKey(&pub1, &sec1);
+	int ret;
+
+	memset(&sec2, 0, sizeof(sec2));
+	ret = blsSecretKeyShare(&sec2, &sec1, 1, &id);
+	CYBOZU_TEST_EQUAL(ret, 0);
+	CYBOZU_TEST_ASSERT(blsSecretKeyIsEqual(&sec1, &sec2));
+	memset(&sec2, 0, sizeof(sec2));
+	ret = blsSecretKeyRecover(&sec2, &sec1, &id, 1);
+	CYBOZU_TEST_EQUAL(ret, 0);
+	CYBOZU_TEST_ASSERT(blsSecretKeyIsEqual(&sec1, &sec2));
+
+	memset(&pub2, 0, sizeof(pub2));
+	ret = blsPublicKeyShare(&pub2, &pub1, 1, &id);
+	CYBOZU_TEST_EQUAL(ret, 0);
+	CYBOZU_TEST_ASSERT(blsPublicKeyIsEqual(&pub1, &pub2));
+	memset(&pub2, 0, sizeof(pub2));
+	ret = blsPublicKeyRecover(&pub2, &pub1, &id, 1);
+	CYBOZU_TEST_EQUAL(ret, 0);
+	CYBOZU_TEST_ASSERT(blsPublicKeyIsEqual(&pub1, &pub2));
+}
+
+void modTest(const char *rStr)
+{
+	unsigned char buf[1024] = {};
+	int ret;
+	blsSecretKey sec;
+	const size_t maxByte = 64; // 512-bit
+	memset(buf, 0xff, maxByte);
+	ret = blsSecretKeySetLittleEndianMod(&sec, buf, maxByte);
+	CYBOZU_TEST_EQUAL(ret, 0);
+	const mpz_class x = (mpz_class(1) << (maxByte * 8)) - 1; // 512-bit 0xff....ff
+	const mpz_class r(rStr);
+	size_t n = blsSecretKeySerialize(buf, sizeof(buf), &sec);
+	CYBOZU_TEST_ASSERT(n > 0);
+	// serialized data to mpz_class
+	mpz_class y = 0;
+	for (size_t i = 0; i < n; i++) {
+		y <<= 8;
+		y += buf[n - 1 - i];
+	}
+	CYBOZU_TEST_EQUAL(y, x % r);
+}
+
 void blsBench()
 {
 	blsSecretKey sec;
@@ -340,8 +393,8 @@ CYBOZU_TEST_AUTO(all)
 {
 	const struct {
 		int curveType;
-		const char *p;
 		const char *r;
+		const char *p;
 	} tbl[] = {
 		{
 			MCL_BN254,
@@ -373,10 +426,12 @@ CYBOZU_TEST_AUTO(all)
 		}
 		bls_use_stackTest();
 		blsDataTest();
-		blsOrderTest(tbl[i].p, tbl[i].r);
+		blsOrderTest(tbl[i].r, tbl[i].p);
 		blsSerializeTest();
 		if (tbl[i].curveType == MCL_BLS12_381) blsVerifyOrderTest();
 		blsAddSubTest();
+		blsTrivialShareTest();
+		modTest(tbl[i].r);
 		blsBench();
 	}
 }

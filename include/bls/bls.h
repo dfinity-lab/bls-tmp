@@ -84,9 +84,13 @@ BLS_DLL_API int blsInit(int curve, int compiledTimeVar);
 
 BLS_DLL_API void blsIdSetInt(blsId *id, int x);
 
-// return 0 if success
-// mask buf with (1 << (bitLen(r) - 1)) - 1 if buf >= r
+// sec = buf & (1 << bitLen(r)) - 1
+// if (sec >= r) sec &= (1 << (bitLen(r) - 1)) - 1
+// always return 0
 BLS_DLL_API int blsSecretKeySetLittleEndian(blsSecretKey *sec, const void *buf, mclSize bufSize);
+// return 0 if success (bufSize <= 64) else -1
+// set (buf mod r) to sec
+BLS_DLL_API int blsSecretKeySetLittleEndianMod(blsSecretKey *sec, const void *buf, mclSize bufSize);
 
 BLS_DLL_API void blsGetPublicKey(blsPublicKey *pub, const blsSecretKey *sec);
 
@@ -140,6 +144,15 @@ BLS_DLL_API int blsSignatureIsValidOrder(const blsSignature *sig);
 BLS_DLL_API int blsPublicKeyIsValidOrder(const blsPublicKey *pub);
 
 #ifndef BLS_MINIMUM_API
+
+/*
+	verify X == sY by checking e(X, sQ) = e(Y, Q)
+	@param X [in]
+	@param Y [in]
+	@param pub [in] pub = sQ
+	@return 1 if e(X, pub) = e(Y, Q) else 0
+*/
+BLS_DLL_API int blsVerifyPairing(const blsSignature *X, const blsSignature *Y, const blsPublicKey *pub);
 
 /*
 	sign the hash
